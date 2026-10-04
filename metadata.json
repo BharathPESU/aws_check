@@ -1,0 +1,6 @@
+{
+  "name": "Maya Monitor - Raspberry Pi & AWS Telemetry System",
+  "description": "Minimal AWS-deployable IoT telemetry and image streaming system connecting Raspberry Pi 4, EC2 Node.js, RDS PostgreSQL, S3, and React dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
