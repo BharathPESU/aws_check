@@ -43,13 +43,21 @@ async function initDatabase() {
       id SERIAL PRIMARY KEY,
       original_filename VARCHAR(255),
       s3_key VARCHAR(500) NOT NULL,
+      temperature NUMERIC(5,2),
+      fan_status VARCHAR(10),
+      mist_status VARCHAR(10),
+      recorded_at TIMESTAMP WITH TIME ZONE,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS temperature NUMERIC(5,2);
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS fan_status VARCHAR(10);
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS mist_status VARCHAR(10);
+    ALTER TABLE images ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMP WITH TIME ZONE;
     CREATE INDEX IF NOT EXISTS idx_images_created_at ON images (created_at DESC);
   `;
   try {
     await pool.query(createTableQuery);
-    console.log('[RDS PostgreSQL] Verified "images" table schema exists.');
+    console.log('[RDS PostgreSQL] Verified "images" schema with telemetry columns (temperature, fan, mist, recorded_at).');
   } catch (err) {
     console.warn('[RDS PostgreSQL] Schema initialization note:', err.message);
   }

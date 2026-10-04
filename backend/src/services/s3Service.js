@@ -140,6 +140,7 @@ module.exports = {
   uploadImageToS3,
   getPresignedImageUrl,
   generateS3Key,
+  canUseS3,
   isS3Configured: () => isS3Configured,
   getBucketName: () => bucketName,
   getRegion: () => region,

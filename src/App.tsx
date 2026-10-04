@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TelemetryCard, { TelemetryData } from './components/TelemetryCard';
 import LatestImage, { ImageData } from './components/LatestImage';
-import ImageHistory from './components/ImageHistory';
+import ServerLogsAndImages, { SystemLogItem } from './components/ServerLogsAndImages';
 import ArchitectureModal from './components/ArchitectureModal';
 import {
   Server,
@@ -40,6 +40,9 @@ export default function App() {
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const [latestImage, setLatestImage] = useState<ImageData | null>(null);
   const [images, setImages] = useState<ImageData[]>([]);
+  const [systemLogs, setSystemLogs] = useState<SystemLogItem[]>([]);
+  const [totalRecords, setTotalRecords] = useState<number>(0);
+  const [logsLimit, setLogsLimit] = useState<number | string>(20);
   const [health, setHealth] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -64,7 +67,8 @@ export default function App() {
   };
 
   // Fetch all endpoints
-  const fetchAllData = async () => {
+  const fetchAllData = async (limitOverride?: number | string) => {
+    const limitToUse = limitOverride !== undefined ? limitOverride : logsLimit;
     try {
       // 1. Health check
       const hData = await safeFetchJson<HealthData>('/api/health');
@@ -84,10 +88,28 @@ export default function App() {
         setLatestImage(lData);
       }
 
-      // 4. Image History
-      const hList = await safeFetchJson<ImageData[]>('/api/images?limit=12');
-      if (Array.isArray(hList)) {
-        setImages(hList);
+      // 4. Comprehensive Logs & Images with user-defined limit
+      const logsRes = await safeFetchJson<{
+        success: boolean;
+        limit: number;
+        totalRecords: number;
+        logs: ImageData[];
+        systemLogs: SystemLogItem[];
+      }>(`/api/logs?limit=${limitToUse}`);
+
+      if (logsRes?.success && Array.isArray(logsRes.logs)) {
+        setImages(logsRes.logs);
+        setTotalRecords(logsRes.totalRecords || logsRes.logs.length);
+        if (Array.isArray(logsRes.systemLogs)) {
+          setSystemLogs(logsRes.systemLogs);
+        }
+      } else {
+        // Fallback to /api/images if /api/logs is not yet mounted on older backend
+        const hList = await safeFetchJson<ImageData[]>(`/api/images?limit=${limitToUse}`);
+        if (Array.isArray(hList)) {
+          setImages(hList);
+          setTotalRecords(hList.length);
+        }
       }
     } catch (_err) {
       // Graceful fallback during server transitions
@@ -96,12 +118,17 @@ export default function App() {
     }
   };
 
-  // Poll every 3 seconds (aligning with default Raspberry Pi transmit rate)
+  // Poll every 3 seconds
   useEffect(() => {
     fetchAllData();
-    const interval = setInterval(fetchAllData, 3000);
+    const interval = setInterval(() => fetchAllData(), 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [logsLimit]);
+
+  const handleLimitChange = (newLimit: number | string) => {
+    setLogsLimit(newLimit);
+    fetchAllData(newLimit);
+  };
 
   // Built-in simulator to trigger mock transmissions matching mock_data.csv
   const sendMockPayload = async (customRecord?: any) => {
@@ -211,7 +238,7 @@ export default function App() {
             </button>
 
             <button
-              onClick={fetchAllData}
+              onClick={() => fetchAllData()}
               title="Refresh Dashboard"
               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700/80 cursor-pointer"
             >
@@ -297,9 +324,14 @@ export default function App() {
         {/* Section 2: Latest Image */}
         <LatestImage image={latestImage} loading={loading} />
 
-        {/* Section 3: Image History Grid */}
-        <ImageHistory
-          images={images}
+        {/* Section 3: Telemetry, Server Logs & Images with configurable limit */}
+        <ServerLogsAndImages
+          logs={images}
+          systemLogs={systemLogs}
+          totalRecords={totalRecords}
+          currentLimit={logsLimit}
+          onLimitChange={handleLimitChange}
+          onRefresh={() => fetchAllData()}
           onSelectImage={(img) => setLatestImage(img)}
           selectedId={latestImage?.id}
         />

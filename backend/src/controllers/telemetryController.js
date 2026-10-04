@@ -75,16 +75,24 @@ async function receiveTelemetry(req, res) {
     );
     console.log('[Telemetry] Image uploaded to S3 with key:', s3Key);
 
-    // 4. Store image ID and S3 object key in PostgreSQL RDS
+    // 4. Store telemetry + image ID and S3 object key in PostgreSQL RDS
     const insertQuery = `
-      INSERT INTO images (original_filename, s3_key)
-      VALUES ($1, $2)
-      RETURNING id, original_filename, s3_key, created_at;
+      INSERT INTO images (original_filename, s3_key, temperature, fan_status, mist_status, recorded_at)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at;
     `;
-    const dbResult = await db.query(insertQuery, [req.file.originalname, s3Key]);
+    const recordedAt = timestamp ? new Date(timestamp) : new Date();
+    const dbResult = await db.query(insertQuery, [
+      req.file.originalname,
+      s3Key,
+      parsedTemp,
+      fan_status.toString().trim().toUpperCase(),
+      mist_status.toString().trim().toUpperCase(),
+      recordedAt,
+    ]);
     const imageRecord = dbResult.rows[0];
 
-    console.log('[Telemetry] Image record inserted into RDS with ID:', imageRecord.id);
+    console.log(`[Telemetry] Recorded in RDS ID: ${imageRecord.id} | Temp: ${parsedTemp}°C | Fan: ${fan_status} | Mist: ${mist_status}`);
 
     // 5. Update live active sensor telemetry state
     currentTelemetry = {

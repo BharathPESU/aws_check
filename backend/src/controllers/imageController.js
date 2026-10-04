@@ -8,7 +8,7 @@ const s3Service = require('../services/s3Service');
 async function getLatestImage(req, res) {
   try {
     const query = `
-      SELECT id, original_filename, s3_key, created_at
+      SELECT id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at
       FROM images
       ORDER BY created_at DESC, id DESC
       LIMIT 1;
@@ -20,6 +20,10 @@ async function getLatestImage(req, res) {
         id: null,
         s3_key: null,
         url: null,
+        temperature: null,
+        fan_status: null,
+        mist_status: null,
+        recorded_at: null,
         message: 'No images available yet',
       });
     }
@@ -32,6 +36,10 @@ async function getLatestImage(req, res) {
       original_filename: image.original_filename,
       s3_key: image.s3_key,
       url: presignedUrl,
+      temperature: image.temperature !== null ? parseFloat(image.temperature) : null,
+      fan_status: image.fan_status,
+      mist_status: image.mist_status,
+      recorded_at: image.recorded_at,
       created_at: image.created_at,
     });
   } catch (error) {
@@ -51,7 +59,7 @@ async function getImages(req, res) {
   try {
     const limit = parseInt(req.query.limit, 10) || 20;
     const query = `
-      SELECT id, original_filename, s3_key, created_at
+      SELECT id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at
       FROM images
       ORDER BY created_at DESC, id DESC
       LIMIT $1;
@@ -67,6 +75,10 @@ async function getImages(req, res) {
           original_filename: img.original_filename,
           s3_key: img.s3_key,
           url: url,
+          temperature: img.temperature !== null ? parseFloat(img.temperature) : null,
+          fan_status: img.fan_status,
+          mist_status: img.mist_status,
+          recorded_at: img.recorded_at,
           created_at: img.created_at,
         };
       })

@@ -6,6 +6,10 @@ export interface ImageData {
   original_filename?: string | null;
   s3_key: string | null;
   url: string | null;
+  temperature?: number | null;
+  fan_status?: string | null;
+  mist_status?: string | null;
+  recorded_at?: string | null;
   created_at?: string;
   message?: string;
 }

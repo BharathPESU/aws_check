@@ -10,6 +10,7 @@ require('dotenv').config();
 const telemetryRoutes = require('./routes/telemetryRoutes');
 const imageRoutes = require('./routes/imageRoutes');
 const healthRoutes = require('./routes/healthRoutes');
+const logRoutes = require('./routes/logRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -34,6 +35,7 @@ app.use('/uploads', express.static(localUploadsDir));
 app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/images', imageRoutes);
 app.use('/api/health', healthRoutes);
+app.use('/api/logs', logRoutes);
 
 // Root route
 app.get('/', (req, res) => {

@@ -101,30 +101,87 @@ interface ImageRecord {
   id: number;
   original_filename: string | null;
   s3_key: string;
+  temperature?: number | null;
+  fan_status?: string | null;
+  mist_status?: string | null;
+  recorded_at?: string | null;
   created_at: string;
+}
+
+const systemLogBuffer: Array<{ id: string; timestamp: string; level: string; message: string }> = [];
+function recordSystemLog(level: string, message: string) {
+  systemLogBuffer.unshift({
+    id: Date.now() + Math.random().toString(36).substring(2, 6),
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+  });
+  if (systemLogBuffer.length > 500) systemLogBuffer.pop();
 }
 
 const memoryDbRecords: ImageRecord[] = [
   {
+    id: 6,
+    original_filename: 'image003.jpg',
+    s3_key: 'images/2026/10/05/sample-003-image003.jpg',
+    temperature: 28.0,
+    fan_status: 'ON',
+    mist_status: 'OFF',
+    recorded_at: '2026-10-05T10:00:25.000Z',
+    created_at: new Date(Date.now() - 10000).toISOString(),
+  },
+  {
+    id: 5,
+    original_filename: 'image002.jpg',
+    s3_key: 'images/2026/10/05/sample-002-image002.jpg',
+    temperature: 30.1,
+    fan_status: 'ON',
+    mist_status: 'ON',
+    recorded_at: '2026-10-05T10:00:20.000Z',
+    created_at: new Date(Date.now() - 25000).toISOString(),
+  },
+  {
+    id: 4,
+    original_filename: 'image001.jpg',
+    s3_key: 'images/2026/10/05/sample-001-image001.jpg',
+    temperature: 26.4,
+    fan_status: 'OFF',
+    mist_status: 'OFF',
+    recorded_at: '2026-10-05T10:00:15.000Z',
+    created_at: new Date(Date.now() - 40000).toISOString(),
+  },
+  {
     id: 3,
     original_filename: 'image003.jpg',
     s3_key: 'images/2026/10/05/sample-003-image003.jpg',
-    created_at: new Date(Date.now() - 30000).toISOString(),
+    temperature: 27.8,
+    fan_status: 'OFF',
+    mist_status: 'ON',
+    recorded_at: '2026-10-05T10:00:10.000Z',
+    created_at: new Date(Date.now() - 55000).toISOString(),
   },
   {
     id: 2,
     original_filename: 'image002.jpg',
     s3_key: 'images/2026/10/05/sample-002-image002.jpg',
-    created_at: new Date(Date.now() - 60000).toISOString(),
+    temperature: 29.2,
+    fan_status: 'ON',
+    mist_status: 'ON',
+    recorded_at: '2026-10-05T10:00:05.000Z',
+    created_at: new Date(Date.now() - 70000).toISOString(),
   },
   {
     id: 1,
     original_filename: 'image001.jpg',
     s3_key: 'images/2026/10/05/sample-001-image001.jpg',
-    created_at: new Date(Date.now() - 90000).toISOString(),
+    temperature: 28.5,
+    fan_status: 'ON',
+    mist_status: 'OFF',
+    recorded_at: '2026-10-05T10:00:00.000Z',
+    created_at: new Date(Date.now() - 85000).toISOString(),
   },
 ];
-let nextId = 4;
+let nextId = 7;
 
 if (databaseUrl) {
   pgPool = new pg.Pool({
@@ -156,11 +213,20 @@ async function initRdsSchema() {
         id SERIAL PRIMARY KEY,
         original_filename VARCHAR(255),
         s3_key VARCHAR(500) NOT NULL,
+        temperature NUMERIC(5,2),
+        fan_status VARCHAR(10),
+        mist_status VARCHAR(10),
+        recorded_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE images ADD COLUMN IF NOT EXISTS temperature NUMERIC(5,2);
+      ALTER TABLE images ADD COLUMN IF NOT EXISTS fan_status VARCHAR(10);
+      ALTER TABLE images ADD COLUMN IF NOT EXISTS mist_status VARCHAR(10);
+      ALTER TABLE images ADD COLUMN IF NOT EXISTS recorded_at TIMESTAMP WITH TIME ZONE;
       CREATE INDEX IF NOT EXISTS idx_images_created_at ON images (created_at DESC);
     `);
-    console.log('[RDS PostgreSQL] Table "images" schema verified.');
+    console.log('[RDS PostgreSQL] Table "images" schema verified with telemetry columns.');
+    recordSystemLog('info', '[RDS PostgreSQL] Schema verified with telemetry columns (temperature, fan, mist, recorded_at)');
   } catch (err: any) {
     console.warn('[RDS PostgreSQL] Table schema check note:', err.message);
   }
@@ -342,15 +408,16 @@ app.post('/api/telemetry', upload.single('image'), async (req: Request, res: Res
 
     // 2. Insert into PostgreSQL RDS or resilient memory store
     let imageRecord: ImageRecord;
+    const recordedAt = timestamp ? new Date(timestamp).toISOString() : new Date().toISOString();
 
     if (pgPool && isRdsConnected) {
       try {
         const insertQuery = `
-          INSERT INTO images (original_filename, s3_key)
-          VALUES ($1, $2)
-          RETURNING id, original_filename, s3_key, created_at;
+          INSERT INTO images (original_filename, s3_key, temperature, fan_status, mist_status, recorded_at)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at;
         `;
-        const result = await pgPool.query(insertQuery, [req.file.originalname, s3Key]);
+        const result = await pgPool.query(insertQuery, [req.file.originalname, s3Key, parsedTemp, fan, mist, recordedAt]);
         imageRecord = result.rows[0];
       } catch (dbErr: any) {
         console.warn('[RDS Query fallback]:', dbErr.message);
@@ -358,6 +425,10 @@ app.post('/api/telemetry', upload.single('image'), async (req: Request, res: Res
           id: nextId++,
           original_filename: req.file.originalname,
           s3_key: s3Key,
+          temperature: parsedTemp,
+          fan_status: fan,
+          mist_status: mist,
+          recorded_at: recordedAt,
           created_at: new Date().toISOString(),
         };
         memoryDbRecords.unshift(imageRecord);
@@ -367,12 +438,16 @@ app.post('/api/telemetry', upload.single('image'), async (req: Request, res: Res
         id: nextId++,
         original_filename: req.file.originalname,
         s3_key: s3Key,
+        temperature: parsedTemp,
+        fan_status: fan,
+        mist_status: mist,
+        recorded_at: recordedAt,
         created_at: new Date().toISOString(),
       };
       memoryDbRecords.unshift(imageRecord);
     }
 
-    console.log(`[Telemetry] Recorded image ID #${imageRecord.id} with S3 key: ${imageRecord.s3_key}`);
+    recordSystemLog('info', `[Telemetry] Packet from Raspberry Pi saved with ID #${imageRecord.id} (Temp: ${parsedTemp}°C, Fan: ${fan}, Mist: ${mist})`);
 
     // 3. Update active telemetry
     activeTelemetry = {
@@ -393,6 +468,7 @@ app.post('/api/telemetry', upload.single('image'), async (req: Request, res: Res
     });
   } catch (error: any) {
     console.error('[Telemetry Error]:', error);
+    recordSystemLog('error', `[Telemetry Error]: ${error.message}`);
     return res.status(500).json({
       success: false,
       error: 'Failed to process telemetry',
@@ -410,7 +486,7 @@ app.get('/api/images/latest', async (_req: Request, res: Response) => {
     if (pgPool && isRdsConnected) {
       try {
         const result = await pgPool.query(`
-          SELECT id, original_filename, s3_key, created_at
+          SELECT id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at
           FROM images
           ORDER BY created_at DESC, id DESC
           LIMIT 1;
@@ -430,6 +506,10 @@ app.get('/api/images/latest', async (_req: Request, res: Response) => {
         id: null,
         s3_key: null,
         url: null,
+        temperature: null,
+        fan_status: null,
+        mist_status: null,
+        recorded_at: null,
         message: 'No images available',
       });
     }
@@ -440,6 +520,10 @@ app.get('/api/images/latest', async (_req: Request, res: Response) => {
       original_filename: image.original_filename,
       s3_key: image.s3_key,
       url,
+      temperature: image.temperature !== undefined && image.temperature !== null ? Number(image.temperature) : null,
+      fan_status: image.fan_status || null,
+      mist_status: image.mist_status || null,
+      recorded_at: image.recorded_at || null,
       created_at: image.created_at,
     });
   } catch (err: any) {
@@ -452,13 +536,23 @@ app.get('/api/images/latest', async (_req: Request, res: Response) => {
 app.get('/api/images', async (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const limit = parseInt(req.query.limit as string, 10) || 20;
+    const rawLimit = req.query.limit as string;
+    let limit = 20;
+    if (rawLimit === 'all') {
+      limit = 1000;
+    } else if (rawLimit) {
+      const parsed = parseInt(rawLimit, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = Math.min(parsed, 1000);
+      }
+    }
+
     let records: ImageRecord[] = [];
 
     if (pgPool && isRdsConnected) {
       try {
         const result = await pgPool.query(
-          `SELECT id, original_filename, s3_key, created_at
+          `SELECT id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at
            FROM images
            ORDER BY created_at DESC, id DESC
            LIMIT $1;`,
@@ -478,6 +572,10 @@ app.get('/api/images', async (req: Request, res: Response) => {
         original_filename: rec.original_filename,
         s3_key: rec.s3_key,
         url: await getPresignedImageUrl(rec.s3_key),
+        temperature: rec.temperature !== undefined && rec.temperature !== null ? Number(rec.temperature) : null,
+        fan_status: rec.fan_status || null,
+        mist_status: rec.mist_status || null,
+        recorded_at: rec.recorded_at || null,
         created_at: rec.created_at,
       }))
     );
@@ -486,6 +584,74 @@ app.get('/api/images', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Get Images Error]:', err);
     return res.status(500).json({ error: 'Failed to retrieve image list', details: err.message });
+  }
+});
+
+// Comprehensive Telemetry, Image & Server Logs (GET /api/logs?limit=N)
+app.get('/api/logs', async (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json');
+  try {
+    const rawLimit = req.query.limit as string;
+    let limit = 20;
+    if (rawLimit === 'all') {
+      limit = 1000;
+    } else if (rawLimit) {
+      const parsed = parseInt(rawLimit, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        limit = Math.min(parsed, 1000);
+      }
+    }
+
+    let records: ImageRecord[] = [];
+    let totalCount = 0;
+
+    if (pgPool && isRdsConnected) {
+      try {
+        const countRes = await pgPool.query('SELECT COUNT(*) AS total FROM images;');
+        totalCount = parseInt(countRes.rows[0].total, 10) || 0;
+
+        const result = await pgPool.query(
+          `SELECT id, original_filename, s3_key, temperature, fan_status, mist_status, recorded_at, created_at
+           FROM images
+           ORDER BY created_at DESC, id DESC
+           LIMIT $1;`,
+          [limit]
+        );
+        records = result.rows;
+      } catch (_e) {
+        totalCount = memoryDbRecords.length;
+        records = memoryDbRecords.slice(0, limit);
+      }
+    } else {
+      totalCount = memoryDbRecords.length;
+      records = memoryDbRecords.slice(0, limit);
+    }
+
+    const telemetryLogs = await Promise.all(
+      records.map(async (rec) => ({
+        id: rec.id,
+        original_filename: rec.original_filename,
+        s3_key: rec.s3_key,
+        url: await getPresignedImageUrl(rec.s3_key),
+        temperature: rec.temperature !== undefined && rec.temperature !== null ? Number(rec.temperature) : null,
+        fan_status: rec.fan_status || 'UNKNOWN',
+        mist_status: rec.mist_status || 'UNKNOWN',
+        recorded_at: rec.recorded_at || null,
+        created_at: rec.created_at,
+      }))
+    );
+
+    return res.status(200).json({
+      success: true,
+      limit: limit,
+      totalRecords: totalCount,
+      returnedCount: telemetryLogs.length,
+      logs: telemetryLogs,
+      systemLogs: systemLogBuffer.slice(0, limit),
+    });
+  } catch (err: any) {
+    console.error('[Get Logs Error]:', err);
+    return res.status(500).json({ success: false, error: 'Failed to retrieve logs', details: err.message });
   }
 });
 

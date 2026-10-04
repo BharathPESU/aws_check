@@ -4,10 +4,11 @@ const db = require('../db');
 const s3Service = require('../services/s3Service');
 
 // GET /api/health
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   const connected = db.isRdsConnected();
   const dbHost = db.getRdsHost ? db.getRdsHost() : 'local';
+  const s3Ready = await s3Service.canUseS3();
 
   res.status(200).json({
     status: 'ok',
@@ -22,10 +23,10 @@ router.get('/', (req, res) => {
       endpoint: dbHost,
     },
     storage: {
-      s3_configured: s3Service.isS3Configured(),
+      s3_configured: s3Ready,
       bucket: s3Service.getBucketName() || 'none (local emulation)',
       region: s3Service.getRegion(),
-      mode: s3Service.isS3Configured() ? 'AWS S3 Direct' : 'Local Emulation (Awaiting EC2 IAM Role)',
+      mode: s3Ready ? 'AWS S3 Direct' : 'Local Emulation (Awaiting EC2 IAM Role or Keys)',
     },
   });
 });

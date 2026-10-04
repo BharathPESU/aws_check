@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TelemetryCard from './components/TelemetryCard';
 import LatestImage from './components/LatestImage';
-import ImageHistory from './components/ImageHistory';
+import ServerLogsAndImages from './components/ServerLogsAndImages';
 import {
   Server,
   Cpu,
@@ -21,6 +21,9 @@ export default function App() {
   const [telemetry, setTelemetry] = useState(null);
   const [latestImage, setLatestImage] = useState(null);
   const [images, setImages] = useState([]);
+  const [systemLogs, setSystemLogs] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [logsLimit, setLogsLimit] = useState(20);
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -31,7 +34,8 @@ export default function App() {
   const simIndexRef = useRef(0);
 
   // Fetch all endpoints
-  const fetchAllData = async () => {
+  const fetchAllData = async (limitOverride) => {
+    const limitToUse = limitOverride !== undefined ? limitOverride : logsLimit;
     try {
       // 1. Health check
       const healthRes = await fetch('/api/health');
@@ -56,12 +60,26 @@ export default function App() {
         setLatestImage(lData);
       }
 
-      // 4. Image History
-      const histRes = await fetch('/api/images?limit=12');
-      if (histRes.ok) {
-        const hData = await histRes.json();
-        if (Array.isArray(hData)) {
-          setImages(hData);
+      // 4. Logs and Image History with configurable limit
+      const logsRes = await fetch(`/api/logs?limit=${limitToUse}`);
+      if (logsRes.ok) {
+        const logData = await logsRes.json();
+        if (logData.success && Array.isArray(logData.logs)) {
+          setImages(logData.logs);
+          setTotalRecords(logData.totalRecords || logData.logs.length);
+          if (Array.isArray(logData.systemLogs)) {
+            setSystemLogs(logData.systemLogs);
+          }
+        }
+      } else {
+        // Fallback to /api/images
+        const histRes = await fetch(`/api/images?limit=${limitToUse}`);
+        if (histRes.ok) {
+          const hData = await histRes.json();
+          if (Array.isArray(hData)) {
+            setImages(hData);
+            setTotalRecords(hData.length);
+          }
         }
       }
     } catch (err) {
@@ -71,12 +89,17 @@ export default function App() {
     }
   };
 
-  // Polling loop every 3 seconds (aligns with Raspberry Pi transmit interval)
+  // Polling loop every 3 seconds
   useEffect(() => {
     fetchAllData();
-    const interval = setInterval(fetchAllData, 3000);
+    const interval = setInterval(() => fetchAllData(), 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [logsLimit]);
+
+  const handleLimitChange = (newLimit) => {
+    setLogsLimit(newLimit);
+    fetchAllData(newLimit);
+  };
 
   // Built-in simulator to trigger mock transmissions directly from the UI
   const sendMockPayload = async (customRecord) => {
@@ -255,8 +278,17 @@ export default function App() {
         {/* 2. Latest Image Received */}
         <LatestImage image={latestImage} loading={loading} />
 
-        {/* 3. Image History Grid */}
-        <ImageHistory images={images} onSelectImage={(img) => setLatestImage(img)} />
+        {/* 3. Telemetry, Server Logs & Images with configurable limit */}
+        <ServerLogsAndImages
+          logs={images}
+          systemLogs={systemLogs}
+          totalRecords={totalRecords}
+          currentLimit={logsLimit}
+          onLimitChange={handleLimitChange}
+          onRefresh={() => fetchAllData()}
+          onSelectImage={(img) => setLatestImage(img)}
+          selectedId={latestImage?.id}
+        />
       </main>
 
       {/* Deployment & Architecture Modal */}
